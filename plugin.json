@@ -1,0 +1,8 @@
+{
+	"$schema": "https://raw.githubusercontent.com/SteamClientHomebrew/Millennium/main/src/system/plugin-schema.json",
+	"name": "partial-achievement-notification",
+	"common_name": "Partial Achievement Notifications",
+	"description": "Shows achievement progress as a toast when it changes while a game is running.",
+	"version": "0.1.0",
+	"backendType": "lua"
+}

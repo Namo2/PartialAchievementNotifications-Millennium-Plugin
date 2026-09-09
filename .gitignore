@@ -1,0 +1,10 @@
+node_modules/
+.millennium/
+out/
+
+*.log
+.env
+
+.DS_Store
+.idea/
+.vscode/
