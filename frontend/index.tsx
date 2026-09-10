@@ -96,7 +96,13 @@ function fireToast(title: string, body: string, iconUrl?: string) {
 	toaster.toast({
 		title,
 		body,
-		icon: iconUrl ? <img src={iconUrl} /> : undefined,
+		logo: iconUrl ? (
+			<img
+				src={iconUrl}
+				alt=""
+				style={{ width: '48px', height: '48px', objectFit: 'cover', flexShrink: 0, display: 'block' }}
+			/>
+		) : undefined,
 		sound: 0,
 		playSound: false,
 	});
@@ -133,7 +139,6 @@ async function pollAchievements(appId: number) {
 				log('PROGRESS CHANGED', a.strID, previous, '->', a.flCurrentProgress, '/', a.flMaxProgress, `(everyN=${everyN})`);
 				fireToast(a.strName, `${a.flCurrentProgress}/${a.flMaxProgress}`, a.strImage);
 			}
-			fireToast(a.strName, `${a.flCurrentProgress}/${a.flMaxProgress}`, a.strImage);
 		}
 	} catch (e) {
 		log('poll error', e);
@@ -151,7 +156,7 @@ function startPolling(appId: number) {
 	currentAppId = appId;
 	lastSeenProgress = {};
 	stopPolling();
-	pollAchievements(appId);
+	pollAchievements(appId).then();
 	pollTimer = window.setInterval(() => pollAchievements(appId), settings.pollIntervalMs);
 }
 
@@ -177,8 +182,6 @@ const TierList = ({ tiers, onChange }: { tiers: Tier[]; onChange: (tiers: Tier[]
 	const addTier = () => {
 		onChange([...tiers, { maxValue: 0, everyN: 1 }]);
 	};
-
-	const sorted = [...tiers].sort((a, b) => a.maxValue - b.maxValue);
 
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
