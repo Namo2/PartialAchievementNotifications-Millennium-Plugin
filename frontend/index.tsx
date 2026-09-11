@@ -1,5 +1,5 @@
 import { definePlugin, toaster, DialogButton, SliderField, ToggleField, TextField, DropdownItem, IconsModule } from '@steambrew/client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { log } from './log';
 import { resolveSoundEType, SOUND_ON_ETYPE_OPTIONS, SOUND_OFF_ETYPE_OPTIONS } from './eTypes';
 import { Tier, settings, loadSettings, persistSettings, getEveryNForMax } from './settings';
@@ -116,29 +116,39 @@ const TierList = ({ tiers, onChange }: { tiers: Tier[]; onChange: (tiers: Tier[]
 		onChange([...tiers, { maxValue: 0, everyN: 1 }]);
 	};
 
+	const labelStyle = { fontSize: '12px', color: '#8f98a0', fontWeight: 600, textTransform: 'uppercase' as const };
+
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-			{tiers.map((tier, i) => (
-				<div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
-					<div style={{ flex: 1 }}>
-						<TextField
-							label={i === 0 ? 'Max value' : undefined}
-							mustBeNumeric
-							value={String(tier.maxValue)}
-							onChange={(e) => updateTier(i, 'maxValue', e.target.value)}
-						/>
-					</div>
-					<div style={{ flex: 1 }}>
-						<TextField
-							label={i === 0 ? 'Every n' : undefined}
-							mustBeNumeric
-							value={String(tier.everyN)}
-							onChange={(e) => updateTier(i, 'everyN', e.target.value)}
-						/>
-					</div>
-					<DialogButton onClick={() => removeTier(i)}>X</DialogButton>
-				</div>
-			))}
+			<div style={{ display: 'grid', gridTemplateColumns: '120px 120px auto', columnGap: '8px', rowGap: '4px', alignItems: 'stretch' }}>
+				<div style={labelStyle}>Max value</div>
+				<div style={labelStyle}>Every n</div>
+				<div />
+				{tiers.map((tier, i) => (
+					<Fragment key={i}>
+						<div style={{ width: '120px', overflow: 'hidden' }}>
+							<TextField
+								mustBeNumeric
+								value={String(tier.maxValue)}
+								onChange={(e) => updateTier(i, 'maxValue', e.target.value)}
+							/>
+						</div>
+						<div style={{ width: '120px', overflow: 'hidden' }}>
+							<TextField
+								mustBeNumeric
+								value={String(tier.everyN)}
+								onChange={(e) => updateTier(i, 'everyN', e.target.value)}
+							/>
+						</div>
+						<DialogButton
+							onClick={() => removeTier(i)}
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+						>
+							X
+						</DialogButton>
+					</Fragment>
+				))}
+			</div>
 			<DialogButton onClick={addTier}>Add tier</DialogButton>
 			<div style={{ fontSize: '11px', color: '#8f98a0' }}>
 				Applied ascending by max value, each tier covering everything above the previous tier's max
@@ -194,14 +204,14 @@ const SettingsContent = () => {
 			/>
 			<ToggleField
 				label="Play notification sound"
-				description="If the toast should play a sound, can be adjusted in the advanced settings, if the behaviour doesn't align with this toggle."
+				description=""
 				checked={playSound}
 				onChange={(checked: boolean) => {
 					setPlaySound(checked);
 					persistSettings({ ...settings, playSound: checked }).then();
 				}}
 			/>
-			<DialogButton onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? 'Hide advanced' : 'Show advanced'}</DialogButton>
+			<DialogButton onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? 'Hide advanced sound settings' : 'Show advanced sound settings'}</DialogButton>
 			{showAdvanced && (
 				<>
 					<DropdownItem
