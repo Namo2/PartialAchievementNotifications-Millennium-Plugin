@@ -1,11 +1,10 @@
-import { definePlugin, toaster, DialogButton, SliderField, ToggleField, TextField, IconsModule, callable } from '@steambrew/client';
+import { definePlugin, toaster, DialogButton, SliderField, ToggleField, TextField, DropdownItem, IconsModule } from '@steambrew/client';
 import { useState, useEffect } from 'react';
+import { log } from './log';
+import { resolveSoundEType, SOUND_ON_ETYPE_OPTIONS, SOUND_OFF_ETYPE_OPTIONS } from './eTypes';
+import { Tier, settings, loadSettings, persistSettings, getEveryNForMax } from './settings';
 
-function log(...args: unknown[]) {
-	console.log('[PAN]', ...args);
-}
-
-interface AchievementEntry {
+type AchievementEntry = {
 	strID: string;
 	strName: string;
 	strDescription: string;
@@ -13,87 +12,17 @@ interface AchievementEntry {
 	bAchieved: boolean;
 	flCurrentProgress: number;
 	flMaxProgress: number;
-}
-
-// A tier covers achievements with max progress at or below maxValue.
-// Tiers sort low to high. Each tier covers the range above the previous tier's maxValue.
-// A toast fires when progress crosses or lands on a multiple of everyN.
-// Progress above the largest maxValue uses the largest tier's everyN.
-// With no tiers set, everyN is 1. Then every change toasts.
-interface Tier {
-	maxValue: number;
-	everyN: number;
-}
-
-interface Settings {
-	pollIntervalMs: number;
-	playSound: boolean;
-	tiers: Tier[];
-}
-
-const DEFAULT_TIERS: Tier[] = [
-	{ maxValue: 100, everyN: 1 },
-	{ maxValue: 1000, everyN: 10 },
-	{ maxValue: 10000, everyN: 100 },
-	{ maxValue: 100000, everyN: 1000 },
-];
-
-const DEFAULT_SETTINGS: Settings = {
-	pollIntervalMs: 5000,
-	playSound: false,
-	tiers: DEFAULT_TIERS,
 };
-
-function getEveryNForMax(tiers: Tier[], maxProgress: number): number {
-	const sorted = [...tiers].sort((a, b) => a.maxValue - b.maxValue);
-	for (const tier of sorted) {
-		if (maxProgress <= tier.maxValue) return tier.everyN;
-	}
-	return sorted.length > 0 ? sorted[sorted.length - 1].everyN : 1;
-}
 
 const MIN_POLL_SECONDS = 1;
 const MAX_POLL_SECONDS = 60;
 const POLL_STEP_SECONDS = 1;
 
-// ---- backend RPC (Lua) ----
-const GetSettingsRpc = callable<[], string>('GetSettings');
-const SaveSettingsRpc = callable<[{ settings_json: string }], string>('SaveSettings');
-
-let settings: Settings = { ...DEFAULT_SETTINGS };
-
-async function loadSettings(): Promise<Settings> {
-	try {
-		const raw = await GetSettingsRpc();
-		const result = JSON.parse(raw ?? '{}');
-		if (result?.success && result?.data) {
-			settings = { ...DEFAULT_SETTINGS, ...result.data };
-			if (!Array.isArray(settings.tiers)) {
-				settings.tiers = [];
-			}
-		}
-	} catch (e) {
-		log('failed to load settings from backend, using defaults', e);
-	}
-	return settings;
-}
-
-async function persistSettings(next: Settings) {
-	settings = next;
-	try {
-		const raw = await SaveSettingsRpc({ settings_json: JSON.stringify(next) });
-		const result = JSON.parse(raw ?? '{}');
-		if (!result?.success) {
-			log('backend rejected settings save', result?.error);
-		}
-	} catch (e) {
-		log('failed to save settings to backend', e);
-	}
-}
-
 // ---- toast dispatch ----
-function fireToast(title: string, body: string, iconUrl?: string) {
-	toaster.toast({
+const fireToast = (title: string, body: string, iconUrl?: string) => {
+	// eType is set through the sound settings, since they are the only reliable way to silence a toast
+	const eType = resolveSoundEType(settings.playSound, settings.soundOnEType, settings.soundOffEType);
+	const toastData: Record<string, unknown> & Parameters<typeof toaster.toast>[0] = {
 		title,
 		body,
 		logo: iconUrl ? (
@@ -103,10 +32,14 @@ function fireToast(title: string, body: string, iconUrl?: string) {
 				style={{ width: '48px', height: '48px', objectFit: 'cover', flexShrink: 0, display: 'block' }}
 			/>
 		) : undefined,
-		sound: 0,
-		playSound: false,
-	});
-}
+		eType,
+		sound: settings.playSound ? 6 : 0,
+		playSound: settings.playSound,
+		critical: settings.playSound,
+	};
+
+	toaster.toast(toastData);
+};
 
 // ---- achievement polling ----
 let pollTimer: number | undefined;
@@ -114,7 +47,7 @@ let pollTimer: number | undefined;
 let lastSeenProgress: Record<string, number> = {};
 let currentAppId: number | undefined;
 
-async function pollAchievements(appId: number) {
+const pollAchievements = async (appId: number) => {
 	try {
 		const res = (await SteamClient.Apps.GetMyAchievementsForApp(String(appId))) as unknown as {
 			data: { rgAchievements: AchievementEntry[] };
@@ -143,29 +76,29 @@ async function pollAchievements(appId: number) {
 	} catch (e) {
 		log('poll error', e);
 	}
-}
+};
 
-function stopPolling() {
+const stopPolling = () => {
 	if (pollTimer) {
 		window.clearInterval(pollTimer);
 		pollTimer = undefined;
 	}
-}
+};
 
-function startPolling(appId: number) {
+const startPolling = (appId: number) => {
 	currentAppId = appId;
 	lastSeenProgress = {};
 	stopPolling();
 	pollAchievements(appId).then();
 	pollTimer = window.setInterval(() => pollAchievements(appId), settings.pollIntervalMs);
-}
+};
 
-function restartPollingIfActive() {
+const restartPollingIfActive = () => {
 	if (currentAppId === undefined) return;
 	stopPolling();
 	const appId = currentAppId;
 	pollTimer = window.setInterval(() => pollAchievements(appId), settings.pollIntervalMs);
-}
+};
 
 // ---- tier list UI ----
 const TierList = ({ tiers, onChange }: { tiers: Tier[]; onChange: (tiers: Tier[]) => void }) => {
@@ -220,12 +153,17 @@ const SettingsContent = () => {
 	const [pollIntervalMs, setPollIntervalMs] = useState(settings.pollIntervalMs);
 	const [playSound, setPlaySound] = useState(settings.playSound);
 	const [tiers, setTiers] = useState<Tier[]>(settings.tiers);
+	const [soundOnEType, setSoundOnEType] = useState(settings.soundOnEType);
+	const [soundOffEType, setSoundOffEType] = useState(settings.soundOffEType);
+	const [showAdvanced, setShowAdvanced] = useState(false);
 
 	useEffect(() => {
 		loadSettings().then((loaded) => {
 			setPollIntervalMs(loaded.pollIntervalMs);
 			setPlaySound(loaded.playSound);
 			setTiers(loaded.tiers);
+			setSoundOnEType(loaded.soundOnEType);
+			setSoundOffEType(loaded.soundOffEType);
 			setReady(true);
 		});
 	}, []);
@@ -256,13 +194,38 @@ const SettingsContent = () => {
 			/>
 			<ToggleField
 				label="Play notification sound"
-				description="Off by default."
+				description="If the toast should play a sound, can be adjusted in the advanced settings, if the behaviour doesn't align with this toggle."
 				checked={playSound}
 				onChange={(checked: boolean) => {
 					setPlaySound(checked);
 					persistSettings({ ...settings, playSound: checked }).then();
 				}}
 			/>
+			<DialogButton onClick={() => setShowAdvanced(!showAdvanced)}>{showAdvanced ? 'Hide advanced' : 'Show advanced'}</DialogButton>
+			{showAdvanced && (
+				<>
+					<DropdownItem
+						label="Sound-on notification type"
+						description="Which notification type is used when the sound toggle above is on."
+						rgOptions={SOUND_ON_ETYPE_OPTIONS}
+						selectedOption={soundOnEType}
+						onChange={({ data }: { data: number }) => {
+							setSoundOnEType(data);
+							persistSettings({ ...settings, soundOnEType: data }).then();
+						}}
+					/>
+					<DropdownItem
+						label="Sound-off notification type"
+						description="Which notification type is used when the sound toggle above is off."
+						rgOptions={SOUND_OFF_ETYPE_OPTIONS}
+						selectedOption={soundOffEType}
+						onChange={({ data }: { data: number }) => {
+							setSoundOffEType(data);
+							persistSettings({ ...settings, soundOffEType: data }).then();
+						}}
+					/>
+				</>
+			)}
 			<div style={{ marginTop: '8px', fontWeight: 600 }}>Notification thresholds</div>
 			<div style={{ fontSize: '11px', color: '#8f98a0', marginBottom: '4px' }}>
 				E.g. max value 100, every 1 -&gt; achievements with 100 or fewer total steps toast on every change.
@@ -274,11 +237,12 @@ const SettingsContent = () => {
 					persistSettings({ ...settings, tiers: next }).then();
 				}}
 			/>
-			<DialogButton onClick={() => fireToast('PAN test toast', 'Chickens 2/20')}>Fire test toast now</DialogButton>
+			<DialogButton onClick={() => fireToast('PAN test toast', '2/20')}>Fire test toast</DialogButton>
 		</div>
 	);
 };
 
+// noinspection JSUnusedGlobalSymbols
 export default definePlugin(() => {
 	log('plugin loading');
 
@@ -304,7 +268,7 @@ export default definePlugin(() => {
 		titleView: <div>Partial Achievement Notifications</div>,
 		content: <SettingsContent />,
 		icon: <IconsModule.Settings />,
-		onDismount() {
+		onDismount: () => {
 			unregisterAchievement.unregister();
 			unregisterLifetime.unregister();
 			stopPolling();
